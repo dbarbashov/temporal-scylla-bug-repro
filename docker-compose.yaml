@@ -1,0 +1,61 @@
+version: "3"
+
+services:
+  scylla:
+    image: scylladb/scylla:4.6.0
+    restart: always
+    command: --smp 1 --memory 250M --overprovisioned 1 --api-address 0.0.0.0
+    networks:
+      - repro-network
+    ports:
+      - "9042:9042"
+  elasticsearch:
+    environment:
+      - cluster.routing.allocation.disk.threshold_enabled=true
+      - cluster.routing.allocation.disk.watermark.low=512mb
+      - cluster.routing.allocation.disk.watermark.high=256mb
+      - cluster.routing.allocation.disk.watermark.flood_stage=128mb
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms200m -Xmx200m
+    image: elasticsearch:7.16.2
+    networks:
+      - repro-network
+    ports:
+      - "9200:9200"
+
+  temporal:
+    depends_on:
+      - scylla
+      - elasticsearch
+    environment:
+      - CASSANDRA_SEEDS=scylla
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development_es.yaml
+
+      - ENABLE_ES=true
+      - ES_SEEDS=elasticsearch
+      - ES_VERSION=v7
+      - BIND_ON_IP=0.0.0.0
+      - TEMPORAL_BROADCAST_ADDRESS=127.0.0.1
+    image: temporalio/auto-setup:1.15.2
+    networks:
+      - repro-network
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./dynamicconfig:/etc/temporal/config/dynamicconfig
+
+  temporal-ui:
+    container_name: temporal-ui
+    depends_on:
+      - temporal
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    image: temporalio/ui:0.7.0
+    networks:
+      - repro-network
+    ports:
+      - 8088:8080
+networks:
+  repro-network:
+    driver: bridge
